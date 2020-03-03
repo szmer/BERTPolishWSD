@@ -1,0 +1,5 @@
+lxml=4.5.0
+pytest==5.3.5
+torch==1.4.0
+transformers==2.5.1
+tokenizesentences==0.2
