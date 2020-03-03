@@ -1,8 +1,13 @@
 import csv
 import re
+import http.client
+import urllib.parse
 
 import torch
 from transformers import BertModel, BertTokenizer
+
+class NetworkError(Exception):
+    pass
 
 def is_nonalphabetic(text):
     return len(text) > 0 and len(re.sub('[^\\W0-9]', '', text)) / len(text) >= 0.65
@@ -12,6 +17,38 @@ def bert_tokenizer():
 
 def bert_model(path):
     return BertModel.from_pretrained(path)
+
+def tag_nkjp(text):
+    """
+    Tag text with NKJP tagset. Returns a list of sentences as lists of (form, lemma, interp).
+    """
+    params = urllib.parse.urlencode({'text': text})
+    headers = {'Content-type': 'application/x-www-form-urlencoded',
+            'Accept': 'text/plain'}
+    conn = http.client.HTTPConnection('localhost:9003') # where KRNNT resides
+    conn.request('POST', '', params, headers)
+    response = conn.getresponse()
+    if response.status != 200:
+        raise NetworkError('Cannot connect to KRNNT: {} {}, is the container running?'.format(
+            response.status, response.reason))
+    resp_html = response.read().decode('utf-8') # we get a HTML page and need to strip tags
+    lines = resp_html[resp_html.index('<pre>')+len('<pre>')
+            :resp_html.index('</pre>')].strip().split('\n')
+    sents = [[]]
+    current_token = None
+    for line_n, line in enumerate(lines):
+        # Next sentence.
+        if len(line) == 0:
+            sents.append([])
+            continue
+        # A form line - assign the form.
+        if line_n % 2 == (0 if (len(sents) % 2 == 1) else 1):
+            current_token = line.split('\t')[0]
+        else:
+            interp_data = line.split('\t')
+            current_token = (current_token, interp_data[1], interp_data[2])
+            sents[-1].append(current_token)
+    return sents
 
 def embedded(text, model, tokenizer, max_length=16):
     """
