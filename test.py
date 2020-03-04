@@ -3,7 +3,8 @@ import numpy as np
 from wsd import (
         average_embedding_list, average_embedding_matrix, bert_model, bert_tokenizer,
         embedded, is_nonalphabetic,
-        tag_nkjp, lemma_form_in_sent, form_tokenization_indices, lemma_embeddings_in_sent
+        tag_nkjp, lemma_form_in_sent, form_tokenization_indices, lemma_embeddings_in_sent,
+        LemmaNotFoundError, CantMatchBERTTokensError
         )
 
 bert_model_path = 'bg_cs_pl_ru_cased_L-12_H-768_A-12_pt/'
@@ -42,15 +43,32 @@ class TestWSD(unittest.TestCase):
     def test_nkjp_form_finding(self):
         form = lemma_form_in_sent('piec', 'Koło pieca postawiono miotłę')
         self.assertEqual(form, 'pieca')
+        form = lemma_form_in_sent('piec', 'Koło pieca postawiono miotłę i piec', num=2)
+        self.assertEqual(form, 'piec')
+        with self.assertRaises(LemmaNotFoundError):
+            lemma_form_in_sent('piec', 'Koło pieca postawiono miotłę', num=2)
 
     def test_tokens_matching(self):
         token_boundaries = form_tokenization_indices('jaskini', 'Witamy w jaskini Raj',
                 self.tokenizer)
         self.assertEqual(token_boundaries, (3,6))
+        token_boundaries = form_tokenization_indices('jaskini',
+                'Witamy w jaskini Raj, najlepszej jaskini',
+                self.tokenizer, num=2)
+        # ['wit', '##amy', 'w', 'ja', '##skin', '##i', 'raj', ',', 'na', '##j', '##le', '##ps',
+        # '##ze', '##j', 'ja', '##skin', '##i']
+        self.assertEqual(token_boundaries, (14,17))
+        with self.assertRaises(CantMatchBERTTokensError):
+            form_tokenization_indices('jaskini', 'Witamy w jaskini Raj', self.tokenizer, num=2)
 
     def test_lemma_embeddings_in_sent(self):
         lemma_embeddings = lemma_embeddings_in_sent('jaskinia', 'Witamy w jaskini Raj', self.model,
                 self.tokenizer)
+        self.assertTrue(isinstance(lemma_embeddings, np.ndarray))
+        self.assertEqual(list(lemma_embeddings.shape), [1, 3, 768])
+        lemma_embeddings = lemma_embeddings_in_sent('jaskinia',
+                'Witamy w jaskini Raj, najlepszej jaskini', self.model,
+                self.tokenizer, num=2)
         self.assertTrue(isinstance(lemma_embeddings, np.ndarray))
         self.assertEqual(list(lemma_embeddings.shape), [1, 3, 768])
 

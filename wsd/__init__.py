@@ -13,9 +13,6 @@ class NetworkError(Exception):
 class LemmaNotFoundError(ValueError):
     pass
 
-class LemmaAmbiguousError(ValueError):
-    pass
-
 class CantMatchBERTTokensError(ValueError):
     pass
 
@@ -28,10 +25,13 @@ def bert_tokenizer():
 def bert_model(path):
     return BertModel.from_pretrained(path)
 
-def sublist_index(list1, list2):
+def sublist_index(list1, list2, num=1):
+    num_found = 0
     for i in range(len(list1)):
         if list1[i:i+len(list2)] == list2:
-            return i
+            num_found += 1
+            if num_found == num:
+                return i
     return -1
 
 def tag_nkjp(text):
@@ -74,44 +74,42 @@ def embedded(text, model, tokenizer):
     with torch.no_grad():
         return model(input_ids)[0]
 
-def form_tokenization_indices(form, sent, tokenizer):
+def form_tokenization_indices(form, sent, tokenizer, num=1):
     """
     Find boundary indices for tokens corresponding to the form in the whole sentence's tokenization.
     """
     form_tokenization = tokenizer.tokenize(form)
     sent_tokenization = tokenizer.tokenize(sent)
-    sub_idx = sublist_index(sent_tokenization, form_tokenization)
+    sub_idx = sublist_index(sent_tokenization, form_tokenization, num=num)
     if sub_idx == -1:
-        raise CantMatchBERTTokensError('Cannot find {} in {}'.format(
-            form_tokenization, sent_tokenization))
+        raise CantMatchBERTTokensError('Cannot find {}th {} in {}'.format(
+            num, form_tokenization, sent_tokenization))
     return sub_idx, sub_idx+len(form_tokenization)
 
-def lemma_form_in_sent(lemma, sent):
+def lemma_form_in_sent(lemma, sent, num=1):
     """
-    Return the form corresponding to the lemma in the sentence.
+    Return the num'th form corresponding to the lemma in the sentence.
     """
     sents = tag_nkjp(sent)
     if len(sents) > 1:
         raise RuntimeError('Many sentences found in text: {}'.format(sent))
     nkjp_interp = sents[0]
     matching_tokens = [tok for tok in nkjp_interp if tok[1] == lemma]
-    if len(matching_tokens) == 0:
+    if len(matching_tokens) < num:
         raise LemmaNotFoundError('Cannot find lemma {} in {}'.format(lemma, sent))
-    elif len(matching_tokens) > 1:
-        raise LemmaAmbiguousError('Found {} in {} {} times'.format(
-            lemma, sent, len(matching_tokens)))
-    return matching_tokens[0][0]
+    return matching_tokens[num-1][0]
 
-def lemma_embeddings_in_sent(lemma, sent, model, tokenizer):
+def lemma_embeddings_in_sent(lemma, sent, model, tokenizer, num=1):
     """
-    Return the embeddings corresponding to the lemma in sent's embeddings.
+    Return the embeddings corresponding to the num'th occurence of a lemma's form in sent's
+    embeddings.
     """
     try:
-        form = lemma_form_in_sent(lemma, sent)
+        form = lemma_form_in_sent(lemma, sent, num=num)
     except LemmaNotFoundError:
         return False
     # NOTE CantMatchBERTTokensError is not catched.
-    tok_idcs = form_tokenization_indices(form, sent, tokenizer)
+    tok_idcs = form_tokenization_indices(form, sent, tokenizer, num=num)
     sent_word_embeddings = embedded(sent, model, tokenizer)
     word_embeddings = sent_word_embeddings[:, tok_idcs[0]:tok_idcs[1], :]
     return word_embeddings.numpy()
@@ -135,7 +133,7 @@ def average_embedding_list(embeddings):
 def load_wn3_corpus(annot_sentences_path, test_ratio=8):
     """
     Returns a list of sentences, as list of lemmas, and a set of words. The first has pairs: (form,
-    lemma, true_sense, tag). Every (test_ratio)th sentence will be treated as belonging to the test
+    lemma, tag, true_sense). Every (test_ratio)th sentence will be treated as belonging to the test
     set.
     """
     train_sents = [] # pairs: (word lemma, lexical unit id [or None])
@@ -157,9 +155,9 @@ def load_wn3_corpus(annot_sentences_path, test_ratio=8):
                 sent_n += 1
             else:
                 if re.match('\\d+', true_sense):
-                    sent.append((form, lemma.lower(), '_'+true_sense, tag))
+                    sent.append((form, lemma.lower(), tag, true_sense))
                 else:
-                    sent.append((form, lemma.lower(), None, tag))
+                    sent.append((form, lemma.lower(), tag, None))
                 if sent_n % test_ratio == 0:
                     test_words.add(lemma.lower())
                 else:

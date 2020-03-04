@@ -1,6 +1,7 @@
 from wsd import (
-        average_embedding, bert_model, bert_tokenizer,
-        embedded, is_nonalphabetic, load_wn3_corpus
+        is_nonalphabetic, load_wn3_corpus,
+        bert_model, bert_tokenizer, 
+        average_embedding_matrix, average_embedding_list, lemma_embeddings_in_sent
         )
 
 from lxml import etree
@@ -38,7 +39,9 @@ for lex_unit in wordnet_xml.iterfind('lexical-unit'):
             word_senses[lemma][variant] = []
         # Ignore mostly non-alphabetic sentences (symbols etc.).
         for sentence in [s for s in splitter.split_into_sentences(gloss) if not is_nonalphabetic(s)]:
-            word_senses[lemma][variant].append(embedded(sentence, model, tokenizer))
+            word_senses[lemma][variant].append(
+                    average_embedding_matrix(lemma_embeddings_in_sent(
+                        lemma, sentence, model, tokenizer)))
 
 ##
 ## (Preliminary stats).
@@ -54,7 +57,7 @@ for word in word_senses:
     avg_found = False
     for sense in word_senses[word]:
         all_ss += 1
-        avg, _ = average_embedding(word_senses[word][sense])
+        avg, _ = average_embedding_list(word_senses[word][sense])
         if isinstance(avg, np.ndarray):
             ss_with_avg += 1
             avg_found = True
