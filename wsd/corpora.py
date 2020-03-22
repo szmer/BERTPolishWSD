@@ -19,6 +19,22 @@ class AnnotatedCorpus(object):
         # All unique words that are present, lowercased.
         self.lemmas = set()
 
+    def get_ambiguous_version(self):
+        """
+        Get an ambiguous version of a sense-annotated corpus (with sense information stripped).
+        """
+        new_corp = AnnotatedCorpus()
+        new_corp.lemmas = copy.copy(self.lemmas)
+        new_corp.raw_sents = copy.copy(self.raw_sents)
+        for sent in self.parsed_sents:
+            new_corp.parsed_sents.append([])
+            for (form, lemma, interp, variant) in sent:
+                new_corp.parsed_sents[-1].append((form, lemma, interp))
+        return new_corp
+
+    def is_ambiguous(self):
+        return (len(self.parsed_sents[0][0]) == 3) if len(self.parsed_sents) > 0 else True
+
 def load_annotated_corpus(annot_sentences_path, test_ratio=8):
     """
     Returns a list of sentences, as list of lemmas, and a set of words (only ones with sense

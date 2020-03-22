@@ -23,30 +23,50 @@ class EmbeddingDict(object):
         """
         return average_embedding_list(self.embedding_lists[lemma][sense]) 
 
-    def predict_sense_for_embedding(self, lemma : str, token_embedding):
+    def predict_sense_for_embedding(self, lemma : str, token_embedding, case='average'):
         """
         Get prediction for the token_embedding assuming the lemma, or None if we have no info for
-        the lemma.
+        the lemma. The 'average' case compares the embedding to average embedding of each sense;
+        the 'best' one selects the sense with one nearest embedding; the 'worst' case selects the
+        sense where the farther embedding is still nearer than farther ones of other senses.
         """
         if not lemma in self.embedding_lists:
             return None
         best_sense = False
         lowest_distance = float('inf')
         for sense in self.embedding_lists[lemma]:
-            sense_embedding = self.embedding_for_sense(lemma, sense)
-            local_distance = distance.cosine(token_embedding, sense_embedding)
-            if local_distance < lowest_distance:
-                lowest_distance = local_distance
-                best_sense = sense
+            if case == 'average':
+                sense_embedding = self.embedding_for_sense(lemma, sense)
+                local_distance = distance.cosine(token_embedding, sense_embedding)
+                if local_distance < lowest_distance:
+                    lowest_distance = local_distance
+                    best_sense = sense
+            elif case == 'best':
+                for sense_embedding in self.embedding_lists[lemma][sense]:
+                    local_distance = distance.cosine(token_embedding, sense_embedding)
+                    if local_distance < lowest_distance:
+                        lowest_distance = local_distance
+                        best_sense = sense
+            elif case == 'worst':
+                all_better = True
+                for sense_embedding in self.embedding_lists[lemma][sense]:
+                    local_distance = distance.cosine(token_embedding, sense_embedding)
+                    if local_distance >= lowest_distance:
+                        all_better = False
+                if all_better:
+                    lowest_distance = local_distance
+                    best_sense = sense
         return best_sense
 
     def form_embedding_in_sent(self, form, raw_sent, num=1):
         return average_embedding_matrix(
                 form_embeddings_in_sent(form, raw_sent, self.model, self.tokenizer, num=num))
 
-    def predict_sense_for_token(self, form, lemma, raw_sent, form_num=1):
+    def predict_sense_for_token(self, form, lemma, raw_sent, form_num=1, case='average'):
+        if not lemma in self.embedding_lists:
+            return None
         token_embedding = self.form_embedding_in_sent(form, raw_sent, num=form_num)
-        return self.predict_sense_for_embedding(lemma, token_embedding)
+        return self.predict_sense_for_embedding(lemma, token_embedding, case=case)
 
     def extend_with_ambiguous_corpus(self, corpus : AnnotatedCorpus, incremental=False,
             catch_errors=True):
@@ -89,6 +109,22 @@ class EmbeddingDict(object):
         if len(errors_encountered) > 0:
             error('Encountered errors: {}'.format([(key, value) for key, value
                 in errors_encountered.items()]))
+
+    def predict(self, corpus, case='average'):
+        assert corpus.is_ambiguous()
+        disamb_sents = []
+        for sent_n, sent in enumerate(corpus.parsed_sents):
+            disamb_sents.append([])
+            raw_sent = corpus.raw_sents[sent_n]
+            # Keeping track of possible occurences of the same forms or lemmas in the sentence. Note
+            # that this may lead to discrepancy with BERT tokenization; compare notes for the
+            # bert.form_tokenization_indices function.
+            form_counts = { data[0]: 1 for data in sent }
+            for (form, lemma, interp) in sent:
+                best_sense = self.predict_sense_for_token(form, lemma, raw_sent,
+                        form_num=form_counts[form], case=case)
+                disamb_sents[-1].append((form, lemma, interp, best_sense))
+        return disamb_sents
 
 def build_embedding_dict(model, tokenizer, *corpora, catch_errors=True):
     errors_encountered = defaultdict(lambda: 0)

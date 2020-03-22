@@ -1,6 +1,7 @@
+import copy
 from logging import info
-
 import unittest
+
 import numpy as np
 
 from local_settings import bert_model_path, bert_tokenizer_name, pl_wordnet_path, annot_corpus_path
@@ -15,7 +16,7 @@ from wsd.bert import (
         LemmaNotFoundError, CantMatchBERTTokensError
         )
 from wsd.embedding_dict import build_embedding_dict
-from wsd.evaluate import embedding_dict_accuracy
+from wsd.evaluate import embedding_dict_accuracy, compare_predictions
 
 model = bert_model(bert_model_path)
 tokenizer = bert_tokenizer(bert_tokenizer_name)
@@ -94,14 +95,14 @@ class TestWSDUtils(unittest.TestCase):
         self.assertEqual(list(lemma_embeddings.shape), [1, 3, 768])
 
 class TestCorporaAndDicts(unittest.TestCase):
-    def is_good_annotated_corpus(self, corp, is_ambigous=False):
+    def is_good_annotated_corpus(self, corp, is_ambiguous=False):
         self.assertTrue(hasattr(corp, 'parsed_sents'))
         self.assertTrue(hasattr(corp, 'raw_sents'))
         self.assertTrue(hasattr(corp, 'lemmas'))
         self.assertTrue(isinstance(corp.parsed_sents, list))
         self.assertTrue(isinstance(corp.parsed_sents[0], list))
         self.assertTrue(isinstance(corp.parsed_sents[0][0], tuple))
-        self.assertEqual(len(corp.parsed_sents[0][0]), 4 if not is_ambigous else 3)
+        self.assertEqual(len(corp.parsed_sents[0][0]), 4 if not is_ambiguous else 3)
         self.assertTrue(isinstance(corp.raw_sents, list))
         self.assertTrue(isinstance(corp.raw_sents[0], str))
         self.assertTrue(isinstance(corp.lemmas, set))
@@ -126,6 +127,15 @@ class TestCorporaAndDicts(unittest.TestCase):
         test_emb_dict = build_embedding_dict(model, tokenizer, test_corp)
         return test_emb_dict
 
+    def test_corp_ambiguous_version(self):
+        test_corp = self.make_sample_corp(['Zimowe zające skaczą dzielnie po łące',
+            'Wojownik ulicy przemierzał dzielnie Warszawy'])
+        test_corp2 = test_corp.get_ambiguous_version()
+        self.is_good_annotated_corpus(test_corp)
+        self.is_good_annotated_corpus(test_corp2, is_ambiguous=True)
+        self.assertFalse(test_corp.is_ambiguous())
+        self.assertTrue(test_corp2.is_ambiguous())
+
     def test_load_annotated_corpus(self):
         info('Loading the annotated corpus...')
         train_corp, test_corp = load_annotated_corpus(annot_corpus_path)
@@ -136,7 +146,7 @@ class TestCorporaAndDicts(unittest.TestCase):
 
     def test_nkjp_loading(self):
         nkjp_corpus = load_nkjp_ambiguous('test_resources/nkjp1m')
-        self.is_good_annotated_corpus(nkjp_corpus, is_ambigous=True)
+        self.is_good_annotated_corpus(nkjp_corpus, is_ambiguous=True)
         self.assertEqual(('o', 'o', 'interj'), nkjp_corpus.parsed_sents[0][0])
         self.assertEqual('o , nadzwyczajne wypadki .', nkjp_corpus.raw_sents[0])
         self.assertIn('o', nkjp_corpus.lemmas)
@@ -167,6 +177,35 @@ class TestCorporaAndDicts(unittest.TestCase):
                 form_num=1)
         self.assertEqual(pred1, '0')
         self.assertIsNone(pred2)
+
+    def test_predict(self):
+        test_emb_dict = self.make_sample_emb_dict()
+        nkjp_corpus = load_nkjp_ambiguous('test_resources/nkjp1m')
+        prediction = test_emb_dict.predict(nkjp_corpus)
+        self.assertTrue(isinstance(prediction, list))
+        self.assertTrue(isinstance(prediction[0], list))
+        self.assertTrue(isinstance(prediction[0][0], tuple))
+        self.assertTrue(nkjp_corpus.is_ambiguous())
+        prediction = test_emb_dict.predict(nkjp_corpus, case='best')
+        self.assertTrue(isinstance(prediction, list))
+        self.assertTrue(isinstance(prediction[0], list))
+        self.assertTrue(isinstance(prediction[0][0], tuple))
+        self.assertTrue(nkjp_corpus.is_ambiguous())
+        prediction = test_emb_dict.predict(nkjp_corpus, case='worst')
+        self.assertTrue(isinstance(prediction, list))
+        self.assertTrue(isinstance(prediction[0], list))
+        self.assertTrue(isinstance(prediction[0][0], tuple))
+        self.assertTrue(nkjp_corpus.is_ambiguous())
+
+    def test_compare_predictions(self):
+        test_emb_dict = self.make_sample_emb_dict()
+        nkjp_corpus = load_nkjp_ambiguous('test_resources/nkjp1m')
+        prediction = test_emb_dict.predict(nkjp_corpus)
+        prediction2 = copy.deepcopy(prediction)
+        self.assertEqual(len(compare_predictions(prediction, prediction2)), 0)
+        x = prediction2[0][0]
+        prediction2[0][0] = (x[0], x[1], x[2], 'nonsense')
+        self.assertEqual(len(compare_predictions(prediction, prediction2)), 1)
 
     def test_extend_with_ambiguous_corpus(self):
         test_emb_dict = self.make_sample_emb_dict()
