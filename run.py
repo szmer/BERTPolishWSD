@@ -1,4 +1,5 @@
 import argparse
+import copy
 import logging
 import pickle
 
@@ -16,14 +17,20 @@ args = argparser.add_argument('--load', help='Load a premade embeddings dictiona
 args = argparser.add_argument('--load2', help=
         'Load a second premade embeddings dictionary. You have to also compare.')
 args = argparser.add_argument('--save', help='Save embeddings dictionary to the file.')
-args = argparser.add_argument('--dont_extend',
-        help='Use incremental strategy when extending dictionaries with corpora of ambiguous texts.',
+args = argparser.add_argument('--extend',
+        help='Extend the trained embedding dictionary with additional, similar cases taken from '
+        'the NKJP corpus.',
         action='store_true')
 args = argparser.add_argument('--incremental',
         help='Use incremental strategy when extending dictionaries with corpora of ambiguous texts.',
         action='store_true')
 args = argparser.add_argument('--compare',
         help='Compare a newly made embedding dictionary\'s predictions with the loaded one\'s',
+        action='store_true')
+args = argparser.add_argument('--load_test_lemmas',
+        help='Load Wordnet glosses also for lemmas from the test corpus to simulate a whole Wordnet'
+        ' information run. Used only when building a dictionary from scratch. Will not use these '
+        'lemmas to extend.',
         action='store_true')
 args = argparser.add_argument('--case',
         help='Use the prediction with average (default), best or worst case. The "average" case '
@@ -37,12 +44,12 @@ args = argparser.parse_args()
 if args.compare and not args.load:
     raise ValueError(
             'You cannot compare unless you load and train another dictionary at the same time.')
-if args.dont_extend and args.incremental:
+if not args.extend and args.incremental:
     raise ValueError('You cannot use the incremental strategy when not extending.')
-if not args.compare and args.load and (args.dont_extend or args.incremental):
+if not args.compare and args.load and (args.incremental or args.load_test_lemmas):
     raise ValueError(
-            'You cannot use dont_extend and incremental options when only loading an embeddings'
-            +' dictionary.')
+            'You cannot use the incremental or load_test_lemmas option when only loading an '
+            'embeddings dictionary.')
 if args.load2 and not args.compare:
     raise ValueError(
             'You have to compare embedding dictionaries when you load two of them.')
@@ -66,13 +73,18 @@ embeddings_dict1, embeddings_dict2 = None, None
 # Training a new embeddings dictionary.
 if (not args.load or args.compare) and not args.load2:
     logging.info('Loading wordnet...')
-    wordnet_corp = wordnet_corpus_for_lemmas(pl_wordnet_path, train_corp.lemmas, model, tokenizer)
+    if args.load_test_lemmas:
+        all_lemmas = copy.copy(train_corp.lemmas)
+        all_lemmas.update(test_corp.lemmas)
+    wordnet_corp = wordnet_corpus_for_lemmas(pl_wordnet_path,
+            train_corp.lemmas if not args.load_test_lemmas else all_lemmas,
+            model, tokenizer)
 
     logging.info('Building the embedding dictionary...')
     embeddings_dict1 = build_embedding_dict(model, tokenizer, train_corp, wordnet_corp)
 
     # Extending, if desired.
-    if not args.dont_extend:
+    if args.extend:
         logging.info('Loading NKJP...')
         nkjp_corp = load_nkjp_ambiguous(nkjp_path)
         logging.info('Extending embeddings with NKJP... (incremental: {})'.format(args.incremental))
