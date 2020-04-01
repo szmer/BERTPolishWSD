@@ -13,26 +13,26 @@ from wsd.evaluate import embedding_dict_accuracy, compare_predictions
 
 argparser = argparse.ArgumentParser(description=
         'Run WSD experiments with estimating senses from examples with BERT.')
-args = argparser.add_argument('--load', help='Load a premade embeddings dictionary.')
-args = argparser.add_argument('--load2', help=
+argparser.add_argument('--load', help='Load a premade embeddings dictionary.')
+argparser.add_argument('--load2', help=
         'Load a second premade embeddings dictionary. You have to also compare.')
-args = argparser.add_argument('--save', help='Save embeddings dictionary to the file.')
-args = argparser.add_argument('--extend',
+argparser.add_argument('--save', help='Save embeddings dictionary to the file.')
+argparser.add_argument('--extend',
         help='Extend the trained embedding dictionary with additional, similar cases taken from '
         'the NKJP corpus.',
         action='store_true')
-args = argparser.add_argument('--incremental',
+argparser.add_argument('--incremental',
         help='Use incremental strategy when extending dictionaries with corpora of ambiguous texts.',
         action='store_true')
-args = argparser.add_argument('--compare',
+argparser.add_argument('--compare',
         help='Compare a newly made embedding dictionary\'s predictions with the loaded one\'s',
         action='store_true')
-args = argparser.add_argument('--load_test_lemmas',
+argparser.add_argument('--load_test_lemmas',
         help='Load Wordnet glosses also for lemmas from the test corpus to simulate a whole Wordnet'
         ' information run. Used only when building a dictionary from scratch. Will not use these '
         'lemmas to extend.',
         action='store_true')
-args = argparser.add_argument('--case',
+argparser.add_argument('--case',
         help='Use the prediction with average (default), best or worst case. The "average" case '
         'compares the embedding to average embedding of each sense; the "best" one selects the sense '
         'with one nearest embedding; the "worst" case selects the sense where the farther embedding '
