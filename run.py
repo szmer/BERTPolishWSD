@@ -4,7 +4,8 @@ import logging
 import pickle
 
 from local_settings import (
-        bert_model_path, bert_tokenizer_name, pl_wordnet_path, annot_corpus_path, nkjp_path
+        bert_model_path, bert_tokenizer_name, pl_wordnet_path, annot_corpus_path, nkjp_path,
+        is_tokenizer_cased
         )
 from wsd.corpora import load_annotated_corpus, wordnet_corpus_for_lemmas, load_nkjp_ambiguous
 from wsd.bert import bert_model, bert_tokenizer
@@ -31,6 +32,13 @@ argparser.add_argument('--load_test_lemmas',
         help='Load Wordnet glosses also for lemmas from the test corpus to simulate a whole Wordnet'
         ' information run. Used only when building a dictionary from scratch. Will not use these '
         'lemmas to extend.',
+        action='store_true')
+argparser.add_argument('--weigh_wordpieces',
+        help='Use NKJP to weight BERT tokenization wordpieces, weighing down the most frequent ones'
+        'in every form.',
+        action='store_true')
+argparser.add_argument('--cut_wordpieces',
+        help='Ignore BERT tokenization wordpieces beyond the fourth one in each form',
         action='store_true')
 argparser.add_argument('--case',
         help='Use the prediction with average (default), best or worst case. The "average" case '
@@ -80,16 +88,25 @@ if (not args.load or args.compare) and not args.load2:
             train_corp.lemmas if not args.load_test_lemmas else all_lemmas,
             model, tokenizer)
 
-    logging.info('Building the embedding dictionary...')
-    embeddings_dict1 = build_embedding_dict(model, tokenizer, train_corp, wordnet_corp)
+    if args.extend or args.weigh_wordpieces:
+        logging.info('Loading NKJP...')
+        nkjp_corp = load_nkjp_ambiguous(nkjp_path, lowercase=not is_tokenizer_cased)
+
+    if args.weigh_wordpieces:
+        logging.info('Counting wordpieces and building the embedding dictionary...')
+        embeddings_dict1 = build_embedding_dict(model, tokenizer, train_corp, wordnet_corp,
+                count_wordpieces_in=nkjp_corp, cut_wordpieces=args.cut_wordpieces)
+    else:
+        logging.info('Building the embedding dictionary...')
+        embeddings_dict1 = build_embedding_dict(model, tokenizer, train_corp, wordnet_corp,
+                cut_wordpieces=args.cut_wordpieces)
+
 
     # Extending, if desired.
     if args.extend:
-        logging.info('Loading NKJP...')
-        nkjp_corp = load_nkjp_ambiguous(nkjp_path)
-        logging.info('Extending embeddings with NKJP... (incremental: {})'.format(args.incremental))
+        logging.info('Extending embeddings with NKJP... (incremental: {})'.format(
+            args.incremental))
         embeddings_dict1.extend_with_ambiguous_corpus(nkjp_corp, incremental=args.incremental)
-
 
     # Saving the embedding dictionary.
     if args.save:

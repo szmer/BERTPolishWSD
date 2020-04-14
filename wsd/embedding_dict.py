@@ -6,6 +6,7 @@ from scipy.spatial import distance
 from wsd.corpora import AnnotatedCorpus
 from wsd.bert import (
         average_embedding_matrix, average_embedding_list, form_embeddings_in_sent,
+        tokenization_freqlist, weight_wordpieces
         )
 
 class EmbeddingDict(object):
@@ -15,6 +16,23 @@ class EmbeddingDict(object):
         self.unified_embeddings = dict()
         self.model = 'no model yet'
         self.tokenizer = 'no tokenizer yet'
+        self.cut_wordpieces = False
+
+    def set_wordpiece_weighting(self, corpus):
+        """
+        Count wordpiece occurences from the corpus and use them to weight wordpieces during mapping
+        BERT to NKJP-style forms.
+        """
+        corpus_forms = set([token_data[0]
+            for sent in corpus.parsed_sents
+            for token_data in sent])
+        self.wordpiece_freqlist = tokenization_freqlist(corpus_forms, self.tokenizer)
+
+    def set_cut_wordpieces(self):
+        """
+        Make the embedding dictionaries ignore all wordpieces beyond the fourth one in each form.
+        """
+        self.cut_wordpieces = True
 
     def embedding_for_sense(self, lemma, sense):
         """
@@ -59,8 +77,23 @@ class EmbeddingDict(object):
         return best_sense
 
     def form_embedding_in_sent(self, form, raw_sent, num=1):
-        return average_embedding_matrix(
-                form_embeddings_in_sent(form, raw_sent, self.model, self.tokenizer, num=num))
+        embeddings = form_embeddings_in_sent(form, raw_sent, self.model, self.tokenizer, num=num)
+        if self.cut_wordpieces:
+            if len(embeddings.shape) == 3 and embeddings.shape[0] == 1:
+                embeddings = embeddings[0][:4]
+            elif len(embeddings.shape) == 2:
+                embeddings = embeddings[:4]
+            else:
+                raise ValueError('got bad embeddings dimensions')
+        if not hasattr(self, 'wordpiece_freqlist'):
+            return average_embedding_matrix(embeddings)
+        else:
+            return average_embedding_matrix(embeddings,
+                    weights=(weight_wordpieces(
+                        self.tokenizer.tokenize(form)
+                        if not self.cut_wordpieces
+                        else weight_wordpieces(self.tokenizer.tokenize(form)[:4])),
+                        self.wordpiece_freqlist))
 
     def predict_sense_for_token(self, form, lemma, raw_sent, form_num=1, case='average'):
         if not lemma in self.embedding_lists:
@@ -111,6 +144,10 @@ class EmbeddingDict(object):
                 in errors_encountered.items()]))
 
     def predict(self, corpus, case='average'):
+        """
+        Predict senses for a whole ambiguous corpus. Return a list of sentences in the disambiguated
+        corpus format (tuples: form, lemma, NKJP interp, sense id).
+        """
         assert corpus.is_ambiguous()
         disamb_sents = []
         for sent_n, sent in enumerate(corpus.parsed_sents):
@@ -126,11 +163,16 @@ class EmbeddingDict(object):
                 disamb_sents[-1].append((form, lemma, interp, best_sense))
         return disamb_sents
 
-def build_embedding_dict(model, tokenizer, *corpora, catch_errors=True):
+def build_embedding_dict(model, tokenizer, *corpora, catch_errors=True,
+        count_wordpieces_in=None, cut_wordpieces=False):
     errors_encountered = defaultdict(lambda: 0)
     emb_dict = EmbeddingDict()
     emb_dict.model = model
     emb_dict.tokenizer = tokenizer
+    if count_wordpieces_in is not None:
+        emb_dict.set_wordpiece_weighting(count_wordpieces_in)
+    if cut_wordpieces:
+        emb_dict.set_cut_wordpieces()
     # Prepare the dictionary. We want to devote a full loop pass to it not to overwrite some
     # important values with update()
     for corp in corpora:
@@ -147,13 +189,13 @@ def build_embedding_dict(model, tokenizer, *corpora, catch_errors=True):
                     try:
                         token_embedding = emb_dict.form_embedding_in_sent(form, raw_sent,
                                 num=form_counts[form])
+                        emb_dict.embedding_lists[lemma][true_sense].append(token_embedding)
                     except Exception as e:
                         if catch_errors:
                             error('Error {} encountered for {} in {}'.format(e, form, raw_sent))
                             errors_encountered[type(e).__name__] += 1
                         else:
                             raise e
-                    emb_dict.embedding_lists[lemma][true_sense].append(token_embedding)
                 form_counts[form] += 1
     if len(errors_encountered) > 0:
         error('Encountered errors: {}'.format([(key, value) for key, value

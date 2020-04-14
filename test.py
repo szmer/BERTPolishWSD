@@ -13,7 +13,7 @@ from wsd.corpora import (
 from wsd.bert import (
         average_embedding_list, average_embedding_matrix, bert_model, bert_tokenizer,
         embedded, lemma_form_in_sent, form_tokenization_indices, lemma_embeddings_in_sent,
-        LemmaNotFoundError, CantMatchBERTTokensError
+        LemmaNotFoundError, CantMatchBERTTokensError, weight_wordpieces
         )
 from wsd.embedding_dict import build_embedding_dict
 from wsd.evaluate import embedding_dict_accuracy, compare_predictions
@@ -26,6 +26,29 @@ class TestWSDUtils(unittest.TestCase):
     def test_nonalphabetic(self):
         self.assertTrue(is_nonalphabetic('342244??!!'))
         self.assertFalse(is_nonalphabetic('I have exactly 72 elephants'))
+
+    def test_averaging(self):
+        example_matrix = np.array([[3, 3, 3, 4, 4, 4], [20, 20, 20, 100, 100, 100]])
+        averaged_matrix = average_embedding_matrix(example_matrix)
+        np.testing.assert_array_almost_equal(averaged_matrix,
+                np.array([11.5, 11.5, 11.5, 52, 52, 52]))
+        example_list = [np.array(elem)
+                for elem in [[3, 3, 3, 4, 4, 4], [20, 20, 20, 100, 100, 100]]]
+        averaged_list = average_embedding_list(example_list)
+        np.testing.assert_array_almost_equal(averaged_list,
+                np.array([11.5, 11.5, 11.5, 52, 52, 52]))
+
+    def test_weighted_averaging(self):
+        example_matrix = np.array([[3, 3, 3, 4, 4, 4], [20, 20, 20, 100, 100, 100]])
+        averaged_matrix = average_embedding_matrix(example_matrix, weights=[2, 0.5])
+        # numpy does scaling here - (2÷2,5)×3+(0,5÷2,5)×20 etc.
+        np.testing.assert_array_almost_equal(averaged_matrix,
+                np.array([6.4, 6.4, 6.4, 23.2, 23.2, 23.2]))
+        example_list = [np.array(elem)
+                for elem in [[3, 3, 3, 4, 4, 4], [20, 20, 20, 100, 100, 100]]]
+        averaged_list = average_embedding_list(example_list, weights=[2, 0.5])
+        np.testing.assert_array_almost_equal(averaged_list,
+                np.array([6.4, 6.4, 6.4, 23.2, 23.2, 23.2]))
 
     def test_text_embeddings(self):
         sample_embedding = embedded('Witamy w jaskini', model, tokenizer)
@@ -73,13 +96,13 @@ class TestWSDUtils(unittest.TestCase):
     def test_tokens_matching(self):
         token_boundaries = form_tokenization_indices('jaskini', 'Witamy w jaskini Raj',
                 tokenizer)
-        self.assertEqual(token_boundaries, (3,6))
+        self.assertEqual(token_boundaries, (4,7))
         token_boundaries = form_tokenization_indices('jaskini',
                 'Witamy w jaskini Raj, najlepszej jaskini',
                 tokenizer, num=2)
         # ['wit', '##amy', 'w', 'ja', '##skin', '##i', 'raj', ',', 'na', '##j', '##le', '##ps',
         # '##ze', '##j', 'ja', '##skin', '##i']
-        self.assertEqual(token_boundaries, (14,17))
+        self.assertEqual(token_boundaries, (15,18))
         with self.assertRaises(CantMatchBERTTokensError):
             form_tokenization_indices('jaskini', 'Witamy w jaskini Raj', tokenizer, num=2)
 
@@ -117,6 +140,12 @@ class TestCorporaAndDicts(unittest.TestCase):
                     for tok in parsed_sent])
             test_corp.lemmas = test_corp.lemmas.union(set([tok[1] for tok in parsed_sent]))
         return test_corp
+
+    def make_sample_ambiguous_corp(self, sents):
+        test_ambiguous_corp = AnnotatedCorpus()
+        test_ambiguous_corp.raw_sents = sents
+        test_ambiguous_corp.parsed_sents = tag_nkjp(sents)
+        return test_ambiguous_corp
 
     def make_sample_emb_dict(self):
         # TODO test the error path
@@ -209,10 +238,8 @@ class TestCorporaAndDicts(unittest.TestCase):
 
     def test_extend_with_ambiguous_corpus(self):
         test_emb_dict = self.make_sample_emb_dict()
-        test_ambiguous_corp = AnnotatedCorpus()
-        test_sent = 'Niedźwiedzie przemierzają dzielnie lasy'
-        test_ambiguous_corp.raw_sents = [test_sent]
-        test_ambiguous_corp.parsed_sents = tag_nkjp(test_sent)
+        test_ambiguous_corp = self.make_sample_ambiguous_corp(
+                ['Niedźwiedzie przemierzają dzielnie lasy'])
         test_emb_dict.extend_with_ambiguous_corpus(test_ambiguous_corp)
         self.assertTrue(len(test_emb_dict.embedding_lists['dzielnie']['0']) == 2
                 or len(test_emb_dict.embedding_lists['dzielnie']['1']) == 2)
@@ -222,6 +249,22 @@ class TestCorporaAndDicts(unittest.TestCase):
         test_emb_dict.extend_with_ambiguous_corpus(test_ambiguous_corp, incremental=True)
         self.assertTrue(len(test_emb_dict.embedding_lists['dzielnie']['0']) == 2
                 or len(test_emb_dict.embedding_lists['dzielnie']['1']) == 2)
+
+    def test_wordpiece_freqlist(self):
+        test_emb_dict = self.make_sample_emb_dict()
+        test_embedding1 = test_emb_dict.form_embedding_in_sent('przemierzają',
+                'Niedźwiedzie przemierzają dzielnie lasy')
+        nkjp_corpus = load_nkjp_ambiguous('test_resources/nkjp1m')
+        test_emb_dict.set_wordpiece_weighting(nkjp_corpus)
+        test_weights = weight_wordpieces(
+                test_emb_dict.tokenizer.tokenize('Niedźwiedzie przemierzają'),
+                test_emb_dict.wordpiece_freqlist)
+        # We know that the first wordpiece, containing an uppercase letter, will have more weight
+        # because of never appearing in the lowercase corpus
+        self.assertGreater(test_weights[0], test_weights[1])
+        test_embedding2 = test_emb_dict.form_embedding_in_sent('przemierzają',
+                'Niedźwiedzie przemierzają dzielnie lasy')
+        assert np.any(np.not_equal(test_embedding1, test_embedding2))
 
     def test_evaluate(self):
         test_emb_dict = self.make_sample_emb_dict()

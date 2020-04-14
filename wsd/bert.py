@@ -95,21 +95,60 @@ def lemma_embeddings_in_sent(lemma, sent, model, tokenizer, num=1):
     form, form_n = lemma_form_in_sent(lemma, sent, num=num)
     return form_embeddings_in_sent(form, sent, model, tokenizer, num=form_n)
 
-def average_embedding_matrix(embeddings):
+def average_embedding_matrix(embeddings, weights=None):
     """
-    Return the average Numpy embedding vector, given a matrix of a couple embeddings for separate
-    tokens as a Numpy array.
+    Return the average Numpy embedding vector, given a tensor of embeddings for separate tokens as a
+    Numpy array. If the tensor is 3D and has 1 in the first dimension, the matrix will be unpacked.
     """
-    average_array = embeddings[0]
-    for other_tensor in embeddings[1:]:
-        average_array += other_tensor
-    return average_array.mean(axis=0)
+    if len(embeddings.shape) == 3:
+        assert embeddings.shape[0] == 1
+        average_array = embeddings[0]
+    else:
+        assert len(embeddings.shape) == 2
+        average_array = embeddings
+    if weights is None:
+        return np.average(average_array, axis=0)
+    else:
+        return np.average(average_array, axis=0, weights=weights)
 
-def average_embedding_list(embeddings):
+def average_embedding_list(embeddings, weights=None):
     """
     Return the average Numpy embedding vector, given a list of embeddings to be averaged.
     """
     if len(embeddings) == 0:
         raise ValueError('An empty embeddings list')
     average_array = np.array(embeddings)
-    return average_array.mean(axis=0)
+    if weights is None:
+        return np.average(average_array, axis=0)
+    else:
+        return np.average(average_array, axis=0, weights=weights)
+
+def tokenization_freqlist(words, tokenizer):
+    """
+    Make a frequency list (dictionary of form -> frequency) of wordpieces in the set of words.
+    """
+    # We don't use a defaultdict because it would refuse to pickle.
+    freqlist = dict()
+    for word in words:
+        wordpieces = tokenizer.tokenize(word)
+        for piece in wordpieces:
+            if not piece in freqlist:
+                freqlist[piece] = 0
+            freqlist[piece] += 1
+    return freqlist
+
+def weight_wordpieces(wordpieces, freqlist):
+    """
+    Return a list of weights for a list of wordpieces, weighting up the infrequent wordpieces and
+    down the frequent ones.
+    """
+    frequencies = {piece: freqlist[piece] for piece in wordpieces}
+    # If there are some pieces that weren't observed.
+    if len([piece for piece in wordpieces if not piece in frequencies]) != 0:
+        min_freq = 1.0
+    else:
+        min_freq = min([freq for (piece, freq) in frequencies.items()])
+    weights = [min_freq
+            / (frequencies[piece] if piece in frequencies else 1.0)
+            for piece in wordpieces]
+    return weights

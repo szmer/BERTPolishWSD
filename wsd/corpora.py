@@ -101,7 +101,21 @@ def wordnet_corpus_for_lemmas(wordnet_path, lemmas, model, tokenizer):
             corpus.raw_sents += raw_sents
     return corpus
 
-def load_nkjp_ambiguous(nkjp_path):
+# This is probably a bad idea, since many forms can contain frequent affixes not present in lemmas.
+###-def all_wordnet_lemmas(wordnet_path, lowercase=True):
+###-    """
+###-    Extract all lemmas from the wordnet.
+###-    """
+###-    lemmas = set()
+###-    wordnet_xml = etree.parse(wordnet_path)
+###-    for lex_unit in wordnet_xml.iterfind('lexical-unit'):
+###-        lemma = lex_unit.get('name')
+###-        if lowercase:
+###-            lemma = lemma.lower()
+###-        lemmas.add(lemma)
+###-    return lemmas
+
+def load_nkjp_ambiguous(nkjp_path, lowercase=True):
     corpus = AnnotatedCorpus()
     some_text_read = False
     for dir_path, dirs, files in os.walk(nkjp_path):
@@ -120,10 +134,14 @@ def load_nkjp_ambiguous(nkjp_path):
                             # Lemma and tag.
                             token_data = field.find(
                                     './/{http://www.tei-c.org/ns/1.0}string').text.split(':')
-                            lemma = token_data[0].lower()
+                            lemma = token_data[0]
+                            if lowercase:
+                                lemma = lemma.lower()
                             interp = ':'.join(token_data[1:])
                         if field.attrib['name'] == 'orth':
-                            form = field.find('.//{http://www.tei-c.org/ns/1.0}string').text.lower()
+                            form = field.find('.//{http://www.tei-c.org/ns/1.0}string').text
+                            if lowercase:
+                                form = form.lower()
                     parsed_sent.append((form, lemma, interp))
                     corpus.lemmas.add(lemma)
                 raw_sent = ' '.join([token[0] for token in parsed_sent])
