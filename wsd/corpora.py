@@ -119,7 +119,7 @@ def load_nkjp_ambiguous(nkjp_path, lowercase=True):
     corpus = AnnotatedCorpus()
     some_text_read = False
     for dir_path, dirs, files in os.walk(nkjp_path):
-        if 'ann_morphosyntax.xml' in files:
+        if 'ann_morphosyntax.xml' in files: # recognize corpus folders
             tree = etree.parse(dir_path+'/ann_morphosyntax.xml')
             some_text_read = True
             # tag is namespaced, .// for finding anywhere in the tree

@@ -29,7 +29,7 @@ This is a work in progress. It's also intended to deprecate the [gibber](https:/
 
 ```bash
 docker pull djstrong/krnnt:1.0.1
-virtualenv
+virtualenv .
 source bin/activate
 pip3 install -r requirements.txt # this may be just pip on some platforms
 deactivate
